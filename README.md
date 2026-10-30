@@ -19,4 +19,4 @@ Everything about Solana and Aurora Intents is new in this repository and built d
 
 ## Licence
 
-MIT, copyright INTRATRADE SINGLE MEMBER P.C.
+MIT, copyright Nikolaos Theodoropoulos (see LICENSE).
