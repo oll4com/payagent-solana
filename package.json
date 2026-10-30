@@ -1,0 +1,12 @@
+{
+  "name": "payagent-solana",
+  "version": "0.1.0",
+  "description": "An AI agent paid per task on Solana: a policy gate before any work, x402 payment on devnet, any-chain deposits through Aurora Intents, and a hash-chained audit log.",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test --test-force-exit test/*.test.js"
+  },
+  "engines": { "node": ">=22" }
+}
