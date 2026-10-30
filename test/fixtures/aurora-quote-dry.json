@@ -1,0 +1,42 @@
+{
+  "timestamp": "2026-10-30T14:48:11.282Z",
+  "signature": "ed25519:4g6NKcaX8ZWpwTbnEZ1wnCSPx8srdRUS9S18Lqr2evhyqU9gy5U2SxfodhJz9mZAhhzB94xNfCpAMUUf1PcT4b8p",
+  "correlationId": "ac9dda1d-734b-4427-a1e5-e8b4758576f7",
+  "quoteRequest": {
+    "dry": true,
+    "swapType": "FLEX_INPUT",
+    "depositType": "ORIGIN_CHAIN",
+    "depositMode": "SIMPLE",
+    "quoteWaitingTimeMs": 0,
+    "confidentiality": "public",
+    "amount": "2800000",
+    "originAsset": "nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near",
+    "destinationAsset": "nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near",
+    "slippageTolerance": 100,
+    "refundTo": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    "refundType": "ORIGIN_CHAIN",
+    "recipient": "HWjmoUNYckccg9Qrwi43JTzBcGcM1nbdAtATf9GXmz16",
+    "recipientType": "DESTINATION_CHAIN",
+    "deadline": "2026-10-30T16:48:11.165Z",
+    "referral": "aurora-2f0fos73ym",
+    "appFees": [
+      {
+        "recipient": "2da316c13fcafc3a6c957ca6a9143622119a1a747bae0975c41a579d21a4cb6e",
+        "fee": 2
+      }
+    ]
+  },
+  "quote": {
+    "timeEstimate": 22,
+    "amountIn": "2800000",
+    "amountInFormatted": "2.8",
+    "amountInUsd": "2.798852000000",
+    "minAmountIn": "2772000",
+    "amountOut": "2789421",
+    "amountOutFormatted": "2.789421",
+    "amountOutUsd": "2.788277337390",
+    "minAmountOut": "2761526",
+    "refundFee": "5300",
+    "withdrawFee": "10005"
+  }
+}
