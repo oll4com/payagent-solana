@@ -8,5 +8,12 @@
   "scripts": {
     "test": "node --test --test-force-exit test/*.test.js"
   },
-  "engines": { "node": ">=22" }
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@solana/kit": "^8.6.0",
+    "@x402/core": "^2.29.0",
+    "@x402/svm": "^2.29.0"
+  }
 }
