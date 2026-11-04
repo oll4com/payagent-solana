@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PayAgent on Solana: slides</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="deck.css">
+</head>
+<body>
+<main id="deck" aria-live="polite">
+
+<section class="slide title" aria-label="Title">
+  <h1>PayAgent on Solana</h1>
+  <p class="big">Pay an AI agent per task, from any chain.</p>
+  <p>A policy gate before the work. The result unlocks when the payment settles on Solana.</p>
+  <p class="tags"><span>Aurora Intents</span><span>Best Use of x402 on Solana</span></p>
+  <p class="small">Encode Club Solana Hackathon 2026 · github.com/oll4com/payagent-solana</p>
+</section>
+
+<section class="slide" aria-label="The problem">
+  <h2>The problem</h2>
+  <ul>
+    <li>An agent that works per task is paid by subscription or a manual checkout.</li>
+    <li>Nobody checks the task before the model spends money on it.</li>
+    <li>A customer who holds USDC on another chain has to bridge first.</li>
+    <li>Afterwards there is no record you can trust of who decided what.</li>
+  </ul>
+</section>
+
+<section class="slide" aria-label="The flow">
+  <h2>One flow, checked at every step</h2>
+  <ol class="flow">
+    <li><b>Task</b><span>description + price</span></li>
+    <li><b>Policy gate</b><span>AUTO · APPROVE · REFUSE, with the rule id</span></li>
+    <li><b>Agent works</b><span>the customer sees a preview</span></li>
+    <li><b>Pay on Solana</b><span>x402, or from Arbitrum / Base</span></li>
+    <li><b>Result unlocks</b><span>only on a settled payment</span></li>
+  </ol>
+  <p>Every step is appended to a hash-chained audit log: an edit or a deletion shows.</p>
+</section>
+
+<section class="slide" aria-label="x402 on Solana">
+  <h2>x402 on Solana (devnet)</h2>
+  <pre>GET /api/tasks/:id/result
+→ 402 Payment Required
+  scheme exact · solana-devnet · devnet USDC
+  amount = the task's price · payTo = the owner</pre>
+  <ul>
+    <li>The wallet signs a USDC transfer; the facilitator verifies, settles and pays the fee.</li>
+    <li>A cent-sized price works: the fee is a fraction of a cent.</li>
+    <li><b>Failed payments</b>: wrong amount, asset, receiver or a broken header → a new 402 with the reason, <code>PAYMENT_REFUSED</code> in the log, the task stays payable.</li>
+  </ul>
+</section>
+
+<section class="slide" aria-label="Aurora Intents">
+  <h2>Any chain in, Solana USDC out</h2>
+  <ol>
+    <li><b>Quote</b>: USDC on Arbitrum or Base → USDC on Solana for the owner. Deposit address, minimum in, minimum out, refund address, deadline.</li>
+    <li><b>Deposit</b> from any wallet or exchange.</li>
+    <li><b>Status</b> polled: PENDING → PROCESSING → SUCCESS.</li>
+    <li><b>Settlement checks</b> before unlocking: deposit ≥ minimum in, delivery ≥ minimum out, and Solana itself shows the credit.</li>
+  </ol>
+  <p class="small">No testnet exists for Aurora: the flow runs on mainnet with small deposits.</p>
+</section>
+
+<section class="slide" aria-label="Refunds">
+  <h2>A failed swap is refunded, and recorded</h2>
+  <ul>
+    <li>Pay less than the quote's minimum: <code>INCOMPLETE_DEPOSIT</code>, then <code>REFUNDED</code> to the customer's address when the quote closes.</li>
+    <li>The task stays payable; the deposit, the refunded amount, the reason and the refund transactions are kept in the task's history and the audit log.</li>
+    <li>A quote with a deposit in flight is never replaced.</li>
+    <li>Aurora reports success but the amounts do not match the quote: the task stays locked and <code>AURORA_SETTLEMENT_REJECTED</code> is logged.</li>
+  </ul>
+</section>
+
+<section class="slide" aria-label="Proof" id="proof">
+  <h2>What ran</h2>
+  <ul id="proof-list">
+    <li>x402 on Solana devnet through the real server: <a href="https://explorer.solana.com/tx/4uNGu3WZmKd1WoFxJ1SDB35R6gPyfiMb5oH9iF5GQyKRMNkRgT6bvauZW2cggstaKZYsVuZ5UHLTrwS86U38i55x?cluster=devnet" rel="noopener">devnet transaction</a></li>
+  </ul>
+</section>
+
+<section class="slide" aria-label="Built and what is new">
+  <h2>What is new, what is reused</h2>
+  <ul>
+    <li><b>Reused, disclosed</b>: the policy gate, the audit log and the model call from payagent (MIT, built for BCH BLAZE).</li>
+    <li><b>New for this hackathon</b>: x402 on Solana, Aurora Intents quotes, status, settlement checks and refunds, the Solana credit check, the page, the demo scripts.</li>
+    <li>26 offline tests; live checks on devnet and mainnet; strict CSP; no owner key on the server.</li>
+  </ul>
+  <p class="small">Next: a browser wallet button for x402, Intents deposits from persistent addresses, mainnet x402.</p>
+</section>
+
+<section class="slide title" aria-label="Links">
+  <h2>Try it</h2>
+  <p class="big">payagent.oll4.com:4951/solana/</p>
+  <p>Source (MIT): github.com/oll4com/payagent-solana</p>
+  <p class="tags"><span>Aurora Intents</span><span>Best Use of x402 on Solana</span></p>
+</section>
+
+</main>
+<p id="counter" class="counter" aria-hidden="true"></p>
+<script src="deck.js" type="module"></script>
+</body>
+</html>
