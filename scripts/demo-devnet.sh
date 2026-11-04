@@ -16,11 +16,14 @@ echo "$task" | json '`   policy: ${v.ruleId} -> ${v.status}; preview: ${(v.previ
 echo "2. Ask for the result without paying"
 curl -s -o /dev/null -w '   HTTP %{http_code} (402 = Payment Required with an x402 exact requirement on solana-devnet)\n' "$base/api/tasks/$id/result"
 
-echo "3. Pay with the customer's devnet wallet (x402, settled by the PayAI facilitator)"
+echo "3. A payment for 1 base unit instead of the price is refused, and the task stays payable"
+node --env-file=.env scripts/devnet-pay.mjs "$base/api/tasks/$id/result" --underpay
+
+echo "4. Pay the right amount with the customer's devnet wallet (x402, settled by the PayAI facilitator)"
 node --env-file=.env scripts/devnet-pay.mjs "$base/api/tasks/$id/result"
 
-echo "4. The task now"
+echo "5. The task now"
 curl -sf "$base/api/tasks/$id" | json '`   ${v.status} via ${v.paidWith}; transaction ${v.transaction}\n   result: ${v.result}`'
 
-echo "5. The audit log"
+echo "6. The audit log"
 curl -sf "$base/api/audit" | json '`   chain verified: ${v.verified.ok}\n` + v.entries.map(e => `   ${e.at ?? ""} ${e.status} ${e.ruleId ?? e.paidWith ?? ""}`).join("\n")'
