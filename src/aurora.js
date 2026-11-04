@@ -2,10 +2,14 @@
 // USDC on the customer's chain into USDC on Solana for the owner's address, and the deposit address's status unlocks the task.
 const BASE = 'https://intents-api.aurora.dev';
 
-// NEAR Intents asset ids (GET /api/tokens): all three are USDC through the POA bridge.
+// NEAR Intents asset ids (GET /api/tokens): USDC with 6 decimals on every EVM chain below (BSC's USDC has 18 and is left out).
 export const ORIGINS = {
   arbitrum: 'nep141:arb-0xaf88d065e77c8cc2239327c5edb3a432268e5831.omft.near',
-  base: 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near'
+  base: 'nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near',
+  ethereum: 'nep141:eth-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48.omft.near',
+  optimism: 'nep245:v2_1.omni.hot.tg:10_A2ewyUyDp6qsue1jqZsGypkCxRJ',
+  polygon: 'nep245:v2_1.omni.hot.tg:137_qiStmoQJDQPTebaPjgx5VBxZv6L',
+  avalanche: 'nep245:v2_1.omni.hot.tg:43114_3atVJH3r5c4GqiSYmg9fECvjc47o'
 };
 export const SOLANA_USDC = 'nep141:sol-5ce3bf3a31af18be40ba30f721101b4341690186.omft.near';
 export const FINAL = new Set(['SUCCESS', 'REFUNDED', 'FAILED']);

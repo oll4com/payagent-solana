@@ -54,7 +54,7 @@ base unit instead of the price, the server refuses it, then the right payment un
 ### Cross-chain payments and refunds (Aurora Intents)
 
 For a task, `POST /api/tasks/:id/aurora-quote {origin, refundTo, minutes}` asks Aurora's Swap API for a `FLEX_INPUT` quote
-that turns USDC on Arbitrum or Base into USDC on Solana for the owner, and returns the deposit address, the amount to send,
+that turns USDC on Arbitrum, Base, Ethereum, Optimism, Polygon or Avalanche into USDC on Solana for the owner, and returns the deposit address, the amount to send,
 the minimum deposit (`minAmountIn`), the minimum the owner will receive (`minAmountOut`), the refund address and the deadline
 (the one asked: Aurora's own answer adds 72 hours to the address's life). The customer sends USDC from any wallet or exchange.
 `POST /api/tasks/:id/aurora-check` (the page calls it every 5 seconds; the server asks Aurora at most once per

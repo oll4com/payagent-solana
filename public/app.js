@@ -7,7 +7,7 @@ const api = async (path, init = {}) => {
   return { status: response.status, headers: response.headers, body };
 };
 const usdc = (units) => (units == null ? '?' : String(Number(units) / 1e6));
-const CHAINS = { arbitrum: 'Arbitrum One', base: 'Base' };
+const CHAINS = { arbitrum: 'Arbitrum One', base: 'Base', ethereum: 'Ethereum', optimism: 'Optimism', polygon: 'Polygon', avalanche: 'Avalanche C-Chain' };
 const STATUS = {
   ACCEPTED: 'Accepted by the policy; the agent is starting.', WORKING: 'The agent is working…',
   NEEDS_APPROVAL: 'Held by the policy for a reviewer (tasks above 1 USDC or 1,000 characters wait for a person).',

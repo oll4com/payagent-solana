@@ -33,7 +33,7 @@ test('a live quote without a deposit address is an error, not a payable task', a
 test('bad inputs never reach Aurora', async () => {
   const { fetch, calls } = fakeFetch(dryQuote);
   const aurora = createAurora({ apiKey: 'k', fetch });
-  await assert.rejects(aurora.quote({ origin: 'ethereum', amount: 1, recipient, refundTo }), /origin/);
+  await assert.rejects(aurora.quote({ origin: 'bitcoin', amount: 1, recipient, refundTo }), /origin/);
   await assert.rejects(aurora.quote({ origin: 'base', amount: '1.5', recipient, refundTo }), /amount/);
   await assert.rejects(aurora.quote({ origin: 'base', amount: 1, recipient: refundTo, refundTo }), /recipient/);
   await assert.rejects(aurora.quote({ origin: 'base', amount: 1, recipient, refundTo: recipient }), /refundTo/);
