@@ -106,7 +106,7 @@ scripts/demo-devnet.sh http://127.0.0.1:8787 "Write a haiku about Solana" 10000
 | `DEVNET_RECEIVER_ADDRESS` | owner's devnet address that x402 payments go to (required) |
 | `SOLANA_RECEIVE_ADDRESS`, `AURORA_API_KEY` | owner's mainnet Solana address and Aurora key; both set turns the Aurora flow on |
 | `DEVNET_PAYER_KEY` | the page's demo wallet, a devnet-only key (unset: no one-click button) |
-| `SOLANA_RPC_URL` | RPC for the settlement check (default the public mainnet RPC, which rate-limits: the check just retries) |
+| `SOLANA_RPC_URL` | RPC(s) for the settlement check, comma separated (default two public mainnet RPCs, asked in turn: they rate-limit, and the check just retries) |
 | `REVIEW_TOKEN` | secret of 24+ characters for the reviewer routes (required) |
 | `MIN_PRICE`, `AUTO_MAX_PRICE`, `MAX_PRICE`, `AUTO_MAX_CHARS` | policy limits in USDC base units / characters |
 | `TASKS_PER_IP_HOUR`, `TASKS_PER_DAY`, `TRUST_PROXY` | public-demo rate limits |
@@ -115,7 +115,7 @@ scripts/demo-devnet.sh http://127.0.0.1:8787 "Write a haiku about Solana" 10000
 
 ## Tests
 
-`npm test` runs 27 tests with no network: the policy and audit chain, x402 requirements and payments through a scripted
+`npm test` runs 28 tests with no network: the policy and audit chain, x402 requirements and payments through a scripted
 facilitator (matching, mismatched and unsettled payments), the Aurora client on a recorded real dry quote, the settlement
 rules above (underpaid deposit refunded, SUCCESS with amounts below the quote rejected, delivery not yet visible on Solana,
 Solana credit below the minimum, a deposit in flight blocking a new quote), the Solana credit parser (also checked against real

@@ -145,7 +145,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     config, audit, agent: createAgent(process.env, config.agentMaxTokens), storePath: join(config.dataDir, 'tasks.json'),
     x402: await createX402({ payTo: config.devnetReceiveAddress }),
     aurora: config.auroraApiKey ? createAurora({ apiKey: config.auroraApiKey }) : null,
-    solana: createSolanaCheck({ rpc: config.solanaRpcUrl || undefined })
+    solana: createSolanaCheck({ rpcs: config.solanaRpcUrl ? config.solanaRpcUrl.split(',').map((u) => u.trim()) : undefined })
   });
   const demoWallet = config.demoPayerKey ? await createDemoWallet(config.demoPayerKey) : null;
   createApp({ config, service, audit, demoWallet }).listen(config.port, () => console.log(`PayAgent on Solana on :${config.port}`));

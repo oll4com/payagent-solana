@@ -5,7 +5,7 @@ import { createSolanaCheck, MAINNET_USDC } from '../src/solana-check.js';
 const OWNER = 'HWjmoUNYckccg9Qrwi43JTzBcGcM1nbdAtATf9GXmz16';
 const balance = (accountIndex, owner, amount, mint = MAINNET_USDC) => ({ accountIndex, owner, mint, uiTokenAmount: { amount: String(amount) } });
 const rpcAnswer = (body, ok = true) => async () => ({ ok, json: async () => body });
-const check = (body, ok) => createSolanaCheck({ fetch: rpcAnswer(body, ok) });
+const check = (body, ok) => createSolanaCheck({ rpcs: ['https://rpc.test'], fetch: rpcAnswer(body, ok) });
 
 test('the credit is the owner\'s USDC balance change, whatever other balances moved', async () => {
   const result = { meta: { err: null,
@@ -30,6 +30,18 @@ test('a failed transaction credits nothing, an unknown one is null, an RPC failu
 test('it asks for the finalized transaction in parsed form', async () => {
   let sent;
   const fetch = async (url, init) => { sent = JSON.parse(init.body); return { ok: true, json: async () => ({ result: null }) }; };
-  await createSolanaCheck({ fetch }).credited({ signature: 'sig1', owner: OWNER });
+  await createSolanaCheck({ rpcs: ['https://rpc.test'], fetch }).credited({ signature: 'sig1', owner: OWNER });
   assert.deepEqual([sent.method, sent.params[0], sent.params[1].commitment, sent.params[1].encoding], ['getTransaction', 'sig1', 'finalized', 'jsonParsed']);
+});
+
+test('when one RPC is rate-limited or has not seen the transaction yet the next is asked; all failing throws, none knowing it is null', async () => {
+  const fresh = { meta: { err: null, preTokenBalances: [], postTokenBalances: [balance(4, OWNER, 2_959_542)] } };
+  const byUrl = (answers) => async (url) => answers[url]();
+  const ok = (body) => () => ({ ok: true, json: async () => body });
+  const limited = () => ({ ok: false, json: async () => ({ error: { message: 'Too many requests' } }) });
+  const rpcs = ['https://a.test', 'https://b.test'];
+  assert.equal(await createSolanaCheck({ rpcs, fetch: byUrl({ 'https://a.test': limited, 'https://b.test': ok({ result: fresh }) }) }).credited({ signature: 's', owner: OWNER }), 2_959_542n);
+  assert.equal(await createSolanaCheck({ rpcs, fetch: byUrl({ 'https://a.test': ok({ result: null }), 'https://b.test': ok({ result: fresh }) }) }).credited({ signature: 's', owner: OWNER }), 2_959_542n);
+  assert.equal(await createSolanaCheck({ rpcs, fetch: byUrl({ 'https://a.test': limited, 'https://b.test': ok({ result: null }) }) }).credited({ signature: 's', owner: OWNER }), null);
+  await assert.rejects(createSolanaCheck({ rpcs, fetch: byUrl({ 'https://a.test': limited, 'https://b.test': limited }) }).credited({ signature: 's', owner: OWNER }), /Too many requests/);
 });
