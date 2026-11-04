@@ -28,6 +28,7 @@ pre { background: var(--bg); border: 1px solid var(--line); border-radius: .5rem
 .status { font-weight: 600; }
 .preview { font-style: italic; }
 ol, ul { padding-left: 1.25rem; }
-#audit-list { font-size: .85rem; overflow-wrap: anywhere; }
+#audit-list { font-size: .85rem; overflow-wrap: anywhere; max-height: 28rem; overflow-y: auto; }
+@media (max-width: 40rem) { dl { grid-template-columns: 1fr; } dd { margin-bottom: .5rem; } }
 footer { padding-bottom: 2rem; }
 [hidden] { display: none !important; }

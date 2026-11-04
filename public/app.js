@@ -120,7 +120,7 @@ async function loadAudit() {
   $('audit-verdict').textContent = body.verified?.ok ? `Chain verified: ${body.entries.length} entries, each linked to the one before.` : 'The audit chain does not verify.';
   $('audit-list').replaceChildren(...(body.entries ?? []).map((e) => {
     const li = document.createElement('li');
-    const { at, status, hash, prev, ...rest } = e;
+    const { at, status, hash, prevHash, ...rest } = e;
     li.append(`${when(at)} ${status} `, code(JSON.stringify(rest)));
     return li;
   }));
