@@ -11,7 +11,7 @@ const CHAINS = { arbitrum: 'Arbitrum One', base: 'Base', ethereum: 'Ethereum', o
 const STATUS = {
   ACCEPTED: 'Accepted by the policy; the agent is starting.', WORKING: 'The agent is working…',
   NEEDS_APPROVAL: 'Held by the policy for a reviewer (tasks above 1 USDC or 1,000 characters wait for a person).',
-  REFUSED: 'Refused by the policy.', DECLINED: 'Declined by the reviewer.', FAILED: 'The agent failed on this task.',
+  REFUSED: 'Refused by the policy.', DECLINED: 'Declined by the reviewer.',
   AWAITING_PAYMENT: 'Done. Pay to unlock the full result.', PAID: 'Paid. The result is unlocked.'
 };
 const AURORA = {
@@ -46,8 +46,9 @@ function render(task) {
   location.hash = `task=${task.id}`;
   $('task-section').hidden = false;
   facts($('facts'), [['Policy', `${task.status === 'REFUSED' ? 'refuse' : 'decision'}: ${task.ruleId ?? '?'}`], ['Price', `${usdc(task.price)} USDC`], ['Reference', code(task.ref)]]);
-  $('status-line').textContent = task.status === 'FAILED' ? `The agent failed on this task (${task.error ?? 'unknown error'}). The model may be busy; try again in a minute.` : STATUS[task.status] ?? task.status;
-  $('retry').hidden = task.status !== 'FAILED';
+  // An answer the built-in offline agent wrote says so, before and after payment.
+  $('status-line').textContent = (STATUS[task.status] ?? task.status) + (task.offlineNotice ? ` ${task.offlineNotice}` : '');
+  $('retry').hidden = !task.canRetry;
   $('preview').textContent = task.preview ?? (task.status === 'REFUSED' ? 'No work was done.' : '');
   const payable = task.status === 'AWAITING_PAYMENT';
   $('pay').hidden = !payable;

@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { decide } from './policy.js';
 import { taskRef } from './audit.js';
+import { OFFLINE_NOTICE, offlineAnswer } from './agent.js';
 
 const PREVIEW_CHARS = 280;
 const MAX_RETRIES = 3; // model calls cost money on a public demo: a failed task may be run again this many times
@@ -33,16 +34,17 @@ export function createService({ config, audit, agent, storePath, x402, aurora, s
     }
   };
 
+  // The model is the demo's weakest part (shared rate limits): when it fails, the built-in offline agent answers, labelled as such,
+  // so a reviewer still reaches the payment step; "Try again" runs the real model again (a few times).
   async function run(task) {
     move(task, 'WORKING');
-    try {
-      const { text, tokens = 0 } = await agent(task.description);
-      const now = new Date().toISOString();
-      move(task, 'AWAITING_PAYMENT', { result: String(text), workedAt: now, agentTokens: tokens,
-        auditDetail: { resultChars: String(text).length, tokens, price: task.price } });
-    } catch (error) {
-      move(task, 'FAILED', { error: error.message, auditDetail: { error: error.message } });
-    }
+    let text, tokens = 0, modelError;
+    try { ({ text, tokens = 0 } = await agent(task.description)); } catch (error) { modelError = error.message; text = offlineAnswer(task.description); }
+    delete task.offline;
+    delete task.modelError;
+    const offline = modelError === undefined ? {} : { offline: true, modelError };
+    move(task, 'AWAITING_PAYMENT', { ...offline, result: String(text), workedAt: new Date().toISOString(), agentTokens: tokens,
+      auditDetail: { resultChars: String(text).length, tokens, price: task.price, ...offline } });
   }
 
   const amount = (v) => (/^\d+$/.test(String(v ?? '')) ? BigInt(v) : 0n);
@@ -84,14 +86,15 @@ export function createService({ config, audit, agent, storePath, x402, aurora, s
       return this.view(task.id);
     },
 
-    // The model endpoint failed (busy, rate limited): run the same accepted task again.
+    // The task was answered offline because the model failed: run it through the model again.
     async retry(id) {
       const task = get(id);
-      if (task.status !== 'FAILED') throw fail(409, `task is ${task.status}`);
-      if ((task.retries ?? 0) >= MAX_RETRIES) throw fail(409, `the agent failed ${MAX_RETRIES + 1} times on this task; submit it again later`);
+      if (task.status !== 'AWAITING_PAYMENT' || !task.offline) throw fail(409, 'only a task answered by the offline agent can be run again');
+      // shortcut: a quote that lapsed unpaid still blocks this, upgrade by letting a lapsed quote go first.
+      if (task.aurora) throw fail(409, 'a cross-chain quote is open on this task; the result must not change under it');
+      if ((task.retries ?? 0) >= MAX_RETRIES) throw fail(409, `the model failed ${MAX_RETRIES + 1} times on this task; submit it again later`);
       assertBudget();
       task.retries = (task.retries ?? 0) + 1;
-      delete task.error;
       move(task, 'ACCEPTED', { auditDetail: { retry: task.retries } });
       await run(task);
       return this.view(id);
@@ -171,7 +174,8 @@ export function createService({ config, audit, agent, storePath, x402, aurora, s
 
     view(id) {
       const { result, ...task } = get(id);
-      return { ...task, ref: taskRef(task.id), preview: result?.slice(0, PREVIEW_CHARS), result: task.status === 'PAID' ? result : undefined };
+      return { ...task, ref: taskRef(task.id), preview: result?.slice(0, PREVIEW_CHARS), result: task.status === 'PAID' ? result : undefined,
+        ...(task.offline ? { offlineNotice: OFFLINE_NOTICE, canRetry: task.status === 'AWAITING_PAYMENT' && !task.aurora && (task.retries ?? 0) < MAX_RETRIES } : {}) };
     },
     list: () => Object.keys(tasks).map((id) => ({ id, status: tasks[id].status, price: tasks[id].price, createdAt: tasks[id].createdAt }))
   };

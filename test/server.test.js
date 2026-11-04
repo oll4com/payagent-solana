@@ -228,21 +228,25 @@ test('behind a path prefix the page, the API and the 402 url all live under it',
   } finally { env.close(); }
 });
 
-test('a task the model failed on can be run again, a few times, and then waits', async () => {
+test('when the model fails the offline agent answers, labelled, the task is still payable, and Try again reruns the model a few times', async () => {
   let calls = 0;
   const agent = async () => { calls += 1; if (calls < 7) throw new Error('agent endpoint answered 429'); return { text: 'now it works', tokens: 3 }; };
   const env = await start({ agent });
   try {
     const task = (await env.call('/tasks', { method: 'POST', body: { description: 'One line', price: 50000 } })).body;
-    assert.deepEqual([task.status, task.error], ['FAILED', 'agent endpoint answered 429']);
-    assert.equal((await env.call(`/tasks/${task.id}/retry`, { method: 'POST' })).body.status, 'FAILED');
-    assert.equal((await env.call(`/tasks/${task.id}/retry`, { method: 'POST' })).body.status, 'FAILED');
-    assert.equal((await env.call(`/tasks/${task.id}/retry`, { method: 'POST' })).body.status, 'FAILED');
+    assert.deepEqual([task.status, task.offline, task.canRetry, task.modelError], ['AWAITING_PAYMENT', true, true, 'agent endpoint answered 429']);
+    assert.match(task.offlineNotice, /answered with its built-in offline agent/);
+    assert.match(task.preview, /^Built-in offline agent: .*Your task \(2 words\): One line$/s);
+    assert.equal((await env.call(`/tasks/${task.id}/result`)).status, 402); // a reviewer still reaches the payment step
+    for (let i = 0; i < 3; i += 1) assert.equal((await env.call(`/tasks/${task.id}/retry`, { method: 'POST' })).body.offline, true);
     const blocked = await env.call(`/tasks/${task.id}/retry`, { method: 'POST' });
-    assert.deepEqual([blocked.status, calls], [409, 4]);
-    assert.equal((await env.call('/tasks', { method: 'POST', body: { description: 'Another', price: 50000 } })).body.status, 'FAILED');
+    assert.deepEqual([blocked.status, calls, (await env.call(`/tasks/${task.id}`)).body.canRetry], [409, 4, false]);
+    assert.equal((await env.call('/tasks', { method: 'POST', body: { description: 'Another', price: 50000 } })).body.offline, true);
     const fresh = (await env.call('/tasks', { method: 'POST', body: { description: 'Third', price: 50000 } })).body;
-    assert.equal((await env.call(`/tasks/${fresh.id}/retry`, { method: 'POST' })).body.preview, 'now it works');
+    const again = (await env.call(`/tasks/${fresh.id}/retry`, { method: 'POST' })).body;
+    assert.deepEqual([again.preview, again.offline, again.offlineNotice, again.canRetry], ['now it works', undefined, undefined, undefined]);
     assert.equal((await env.call(`/tasks/${fresh.id}/retry`, { method: 'POST' })).status, 409);
+    const audit = (await env.call('/audit')).body.entries;
+    assert.ok(audit.some((e) => e.status === 'AWAITING_PAYMENT' && e.offline === true && e.modelError === 'agent endpoint answered 429'));
   } finally { env.close(); }
 });

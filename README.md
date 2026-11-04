@@ -133,6 +133,11 @@ mainnet payout transactions), the demo wallet route, the security headers and `B
 
 ## Known limits
 
+- **The demo's model can be busy.** It runs on shared, rate-limited capacity. When the model call fails, the task is answered by
+  a built-in offline agent that runs no language model and only restates the task, so a reviewer still reaches the payment
+  step. The page and the audit log say so: *"The model was busy, so this demo answered with its built-in offline agent."*
+  **Try again** (up to 3 times per task, before any cross-chain quote is opened) runs the real model again and replaces the
+  offline answer. The payment, settlement and refund logic does not depend on which agent wrote the result.
 - Tasks are kept in one JSON file and the audit log in one file: a single instance, not a cluster.
 - The settlement check reads Solana through a public RPC; a busy RPC delays an unlock but never allows a wrong one.
 - If a deposit lands on the address of a quote that was already replaced (only possible after the quote expired with nothing

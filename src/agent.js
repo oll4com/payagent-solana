@@ -4,6 +4,11 @@
 const SYSTEM = 'You complete one well-defined task for a paying customer. Answer with the finished work only. Keep it under '
   + '300 words unless the task needs a list or code, and never over 600 words.';
 
+// Shown with every answer the built-in offline agent wrote (UI, README, audit log): it runs no model, so nobody mistakes it for one.
+export const OFFLINE_NOTICE = 'The model was busy, so this demo answered with its built-in offline agent.';
+export const offlineAnswer = (description) => 'Built-in offline agent: it runs no language model and only restates your task, so the payment steps can still be shown.\n\n'
+  + `Your task (${description.split(/\s+/).filter(Boolean).length} words): ${description}`;
+
 export function createAgent(env = process.env, maxTokens = 800) {
   if (env.AGENT_MODE === 'echo') return async (description) => ({ text: `[echo test agent] ${description}`, tokens: 0 });
   const { AGENT_API_URL: url, AGENT_API_KEY: key, AGENT_MODEL: model, AGENT_REASONING_EFFORT: effort } = env;
