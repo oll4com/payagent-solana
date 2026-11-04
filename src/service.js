@@ -7,6 +7,7 @@ import { decide } from './policy.js';
 import { taskRef } from './audit.js';
 
 const PREVIEW_CHARS = 280;
+const MAX_RETRIES = 3; // model calls cost money on a public demo: a failed task may be run again this many times
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
 export function createService({ config, audit, agent, storePath, x402, aurora, solana }) {
@@ -81,6 +82,19 @@ export function createService({ config, audit, agent, storePath, x402, aurora, s
       move(task, status, { ruleId, auditDetail: { decision, ruleId, price } });
       if (status === 'ACCEPTED') await run(task);
       return this.view(task.id);
+    },
+
+    // The model endpoint failed (busy, rate limited): run the same accepted task again.
+    async retry(id) {
+      const task = get(id);
+      if (task.status !== 'FAILED') throw fail(409, `task is ${task.status}`);
+      if ((task.retries ?? 0) >= MAX_RETRIES) throw fail(409, `the agent failed ${MAX_RETRIES + 1} times on this task; submit it again later`);
+      assertBudget();
+      task.retries = (task.retries ?? 0) + 1;
+      delete task.error;
+      move(task, 'ACCEPTED', { auditDetail: { retry: task.retries } });
+      await run(task);
+      return this.view(id);
     },
 
     // A person accepts or declines a task the policy held.

@@ -46,7 +46,8 @@ function render(task) {
   location.hash = `task=${task.id}`;
   $('task-section').hidden = false;
   facts($('facts'), [['Policy', `${task.status === 'REFUSED' ? 'refuse' : 'decision'}: ${task.ruleId ?? '?'}`], ['Price', `${usdc(task.price)} USDC`], ['Reference', code(task.ref)]]);
-  $('status-line').textContent = STATUS[task.status] ?? task.status;
+  $('status-line').textContent = task.status === 'FAILED' ? `The agent failed on this task (${task.error ?? 'unknown error'}). The model may be busy; try again in a minute.` : STATUS[task.status] ?? task.status;
+  $('retry').hidden = task.status !== 'FAILED';
   $('preview').textContent = task.preview ?? (task.status === 'REFUSED' ? 'No work was done.' : '');
   const payable = task.status === 'AWAITING_PAYMENT';
   $('pay').hidden = !payable;
@@ -153,6 +154,13 @@ $('aurora-form').addEventListener('submit', async (event) => {
   const { status, body } = await api(`tasks/${taskId}/aurora-quote`, { method: 'POST', body: JSON.stringify({ origin: $('origin').value, refundTo: $('refund-to').value.trim(), minutes: Number($('minutes').value) }) });
   if (status !== 200) return showError('aurora-error', body.error ?? `Error ${status}`);
   render(body);
+});
+$('retry').addEventListener('click', async () => {
+  $('retry').disabled = true;
+  const { status, body } = await api(`tasks/${taskId}/retry`, { method: 'POST' });
+  $('retry').disabled = false;
+  if (status === 200) render(body);
+  else $('status-line').textContent = body.error ?? `Error ${status}`;
 });
 $('audit-refresh').addEventListener('click', loadAudit);
 

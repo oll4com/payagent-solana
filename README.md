@@ -115,7 +115,7 @@ scripts/demo-devnet.sh http://127.0.0.1:8787 "Write a haiku about Solana" 10000
 
 ## Tests
 
-`npm test` runs 26 tests with no network: the policy and audit chain, x402 requirements and payments through a scripted
+`npm test` runs 27 tests with no network: the policy and audit chain, x402 requirements and payments through a scripted
 facilitator (matching, mismatched and unsettled payments), the Aurora client on a recorded real dry quote, the settlement
 rules above (underpaid deposit refunded, SUCCESS with amounts below the quote rejected, delivery not yet visible on Solana,
 Solana credit below the minimum, a deposit in flight blocking a new quote), the Solana credit parser (also checked against real

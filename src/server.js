@@ -107,6 +107,7 @@ export function createApp({ config, service, audit, demoWallet = null }) {
         const answer = await service.x402Result(id, { url, paymentSignature: req.headers['payment-signature'] });
         return send(answer.status, answer.body, answer.headers);
       }
+      if (action === 'retry' && req.method === 'POST') return send(200, await service.retry(id));
       if (action === 'demo-pay' && req.method === 'POST') {
         if (!demoWallet) return send(404, { error: 'this server has no demo wallet' });
         const url = `${req.headers['x-forwarded-proto'] ?? 'http'}://${req.headers.host}${requested.replace(/demo-pay$/, 'result')}`;

@@ -20,12 +20,12 @@ const facilitator = {
   settle: async () => ({ success: true, transaction: '5devnetSig', network: DEVNET, payer: 'Payer1111' })
 };
 
-async function start({ aurora = null, owner = OWNER, solana, basePath = '', demoWallet = null } = {}) {
+async function start({ aurora = null, owner = OWNER, solana, basePath = '', demoWallet = null, agent = createAgent({ AGENT_MODE: 'echo' }) } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'payagent-solana-'));
   const config = loadConfig({ DEVNET_RECEIVER_ADDRESS: DEVNET_RECEIVER, SOLANA_RECEIVE_ADDRESS: owner, AURORA_API_KEY: aurora ? 'k' : '',
     AURORA_RECHECK_MS: '0', REVIEW_TOKEN: 'r'.repeat(24), DATA_DIR: dir, BASE_PATH: basePath });
   const audit = createAuditLog(join(dir, 'audit.jsonl'));
-  const service = createService({ config, audit, agent: createAgent({ AGENT_MODE: 'echo' }), storePath: join(dir, 'tasks.json'),
+  const service = createService({ config, audit, agent, storePath: join(dir, 'tasks.json'),
     x402: await createX402({ payTo: DEVNET_RECEIVER, facilitator }), aurora, solana });
   const server = createApp({ config, service, audit, demoWallet }).listen(0);
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -225,5 +225,24 @@ test('behind a path prefix the page, the API and the 402 url all live under it',
     const task = (await env.call('/tasks', { method: 'POST', body: { description: 'One line', price: 50000 } })).body;
     const unpaid = await env.call(`/tasks/${task.id}/result`);
     assert.equal(decodePaymentRequiredHeader(unpaid.headers.get('payment-required')).resource.url, `${env.origin}/solana/api/tasks/${task.id}/result`);
+  } finally { env.close(); }
+});
+
+test('a task the model failed on can be run again, a few times, and then waits', async () => {
+  let calls = 0;
+  const agent = async () => { calls += 1; if (calls < 7) throw new Error('agent endpoint answered 429'); return { text: 'now it works', tokens: 3 }; };
+  const env = await start({ agent });
+  try {
+    const task = (await env.call('/tasks', { method: 'POST', body: { description: 'One line', price: 50000 } })).body;
+    assert.deepEqual([task.status, task.error], ['FAILED', 'agent endpoint answered 429']);
+    assert.equal((await env.call(`/tasks/${task.id}/retry`, { method: 'POST' })).body.status, 'FAILED');
+    assert.equal((await env.call(`/tasks/${task.id}/retry`, { method: 'POST' })).body.status, 'FAILED');
+    assert.equal((await env.call(`/tasks/${task.id}/retry`, { method: 'POST' })).body.status, 'FAILED');
+    const blocked = await env.call(`/tasks/${task.id}/retry`, { method: 'POST' });
+    assert.deepEqual([blocked.status, calls], [409, 4]);
+    assert.equal((await env.call('/tasks', { method: 'POST', body: { description: 'Another', price: 50000 } })).body.status, 'FAILED');
+    const fresh = (await env.call('/tasks', { method: 'POST', body: { description: 'Third', price: 50000 } })).body;
+    assert.equal((await env.call(`/tasks/${fresh.id}/retry`, { method: 'POST' })).body.preview, 'now it works');
+    assert.equal((await env.call(`/tasks/${fresh.id}/retry`, { method: 'POST' })).status, 409);
   } finally { env.close(); }
 });
