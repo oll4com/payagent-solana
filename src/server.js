@@ -2,6 +2,7 @@
 // Solana devnet and the Aurora Intents deposit routes.
 import { createServer } from 'node:http';
 import { mkdirSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { timingSafeEqual } from 'node:crypto';
 import { join } from 'node:path';
 import { loadConfig } from './config.js';
@@ -10,6 +11,8 @@ import { createAgent } from './agent.js';
 import { createService } from './service.js';
 import { createX402 } from './x402-solana.js';
 import { createAurora } from './aurora.js';
+import { createSolanaCheck } from './solana-check.js';
+import { createDemoWallet } from './demo-wallet.js';
 
 const MAX_BODY = 16 * 1024;
 const SECURITY_HEADERS = {
@@ -18,6 +21,13 @@ const SECURITY_HEADERS = {
   'referrer-policy': 'no-referrer',
   'cross-origin-opener-policy': 'same-origin'
 };
+
+// The pages are a fixed list of files in public/ (no path from the request reaches the file system).
+const PAGE_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const PAGES = { '/': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
+  '/style.css': ['style.css', 'text/css; charset=utf-8'], '/favicon.svg': ['favicon.svg', 'image/svg+xml'],
+  '/deck': ['deck.html', 'text/html; charset=utf-8'], '/deck.js': ['deck.js', 'text/javascript; charset=utf-8'], '/deck.css': ['deck.css', 'text/css; charset=utf-8'] };
+const PUBLIC_DIR = new URL('../public/', import.meta.url);
 
 // Fixed windows kept in memory: a restart forgets them, which only ever lets a few extra tasks through.
 export function createTaskLimiter({ tasksPerIpHour, tasksPerDay }, now = () => Date.now()) {
@@ -36,7 +46,7 @@ export function createTaskLimiter({ tasksPerIpHour, tasksPerDay }, now = () => D
   };
 }
 
-export function createApp({ config, service, audit }) {
+export function createApp({ config, service, audit, demoWallet = null }) {
   const limitTask = createTaskLimiter(config);
   // Behind a reverse proxy (TRUST_PROXY=1, the port reachable only by the proxy) the client is the last X-Forwarded-For entry.
   const clientIp = (req) => (config.trustProxy && req.headers['x-forwarded-for']?.split(',').pop().trim()) || req.socket.remoteAddress;
@@ -60,13 +70,24 @@ export function createApp({ config, service, audit }) {
       res.end(JSON.stringify(value));
     };
     try {
-      const { pathname } = new URL(req.url, 'http://local');
+      const requested = new URL(req.url, 'http://local').pathname;
+      let pathname = requested;
+      if (config.basePath) {
+        if (requested === config.basePath) { res.writeHead(301, { location: `${requested}/` }); return res.end(); }
+        if (!requested.startsWith(`${config.basePath}/`)) return send(404, { error: 'not found' });
+        pathname = requested.slice(config.basePath.length);
+      }
+      const page = (req.method === 'GET' || req.method === 'HEAD') && PAGES[pathname];
+      if (page) {
+        res.writeHead(200, { ...SECURITY_HEADERS, 'content-security-policy': PAGE_CSP, 'content-type': page[1], 'cache-control': 'no-cache' });
+        return res.end(await readFile(new URL(page[0], PUBLIC_DIR)));
+      }
       const [, api, resource, id, action] = pathname.split('/');
       if (api !== 'api') return send(404, { error: 'not found' });
       if (resource === 'config' && req.method === 'GET') {
         return send(200, { minPrice: config.minPrice, autoMaxPrice: config.autoMaxPrice, maxPrice: config.maxPrice,
           devnetReceiveAddress: config.devnetReceiveAddress, auroraEnabled: Boolean(config.auroraApiKey && config.solanaReceiveAddress),
-          repoUrl: config.repoUrl || null });
+          solanaReceiveAddress: config.solanaReceiveAddress || null, demoWallet: Boolean(demoWallet), repoUrl: config.repoUrl || null });
       }
       if (resource === 'audit' && req.method === 'GET') {
         const entries = audit.read();
@@ -82,13 +103,21 @@ export function createApp({ config, service, audit }) {
       }
       if (id && !action && req.method === 'GET') return send(200, service.view(id));
       if (action === 'result' && req.method === 'GET') {
-        const url = `${req.headers['x-forwarded-proto'] ?? 'http'}://${req.headers.host}${pathname}`;
+        const url = `${req.headers['x-forwarded-proto'] ?? 'http'}://${req.headers.host}${requested}`;
         const answer = await service.x402Result(id, { url, paymentSignature: req.headers['payment-signature'] });
         return send(answer.status, answer.body, answer.headers);
       }
+      if (action === 'demo-pay' && req.method === 'POST') {
+        if (!demoWallet) return send(404, { error: 'this server has no demo wallet' });
+        const url = `${req.headers['x-forwarded-proto'] ?? 'http'}://${req.headers.host}${requested.replace(/demo-pay$/, 'result')}`;
+        const asked = await service.x402Result(id, { url });
+        if (asked.status !== 402) return send(asked.status, asked.body, asked.headers);
+        const paid = await service.x402Result(id, { url, paymentSignature: (await demoWallet.paymentHeaders(asked))['PAYMENT-SIGNATURE'] });
+        return send(paid.status, paid.body, paid.headers);
+      }
       if (action === 'aurora-quote' && req.method === 'POST') {
-        const { origin, refundTo } = await body(req);
-        return send(200, await service.auroraQuote(id, { origin, refundTo }));
+        const { origin, refundTo, minutes } = await body(req);
+        return send(200, await service.auroraQuote(id, { origin, refundTo, minutes }));
       }
       if (action === 'aurora-check' && req.method === 'POST') return send(200, await service.auroraCheck(id));
       if (action === 'review' && req.method === 'POST') {
@@ -114,7 +143,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const service = createService({
     config, audit, agent: createAgent(process.env, config.agentMaxTokens), storePath: join(config.dataDir, 'tasks.json'),
     x402: await createX402({ payTo: config.devnetReceiveAddress }),
-    aurora: config.auroraApiKey ? createAurora({ apiKey: config.auroraApiKey }) : null
+    aurora: config.auroraApiKey ? createAurora({ apiKey: config.auroraApiKey }) : null,
+    solana: createSolanaCheck({ rpc: config.solanaRpcUrl || undefined })
   });
-  createApp({ config, service, audit }).listen(config.port, () => console.log(`PayAgent on Solana on :${config.port}`));
+  const demoWallet = config.demoPayerKey ? await createDemoWallet(config.demoPayerKey) : null;
+  createApp({ config, service, audit, demoWallet }).listen(config.port, () => console.log(`PayAgent on Solana on :${config.port}`));
 }

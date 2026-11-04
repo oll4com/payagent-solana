@@ -25,21 +25,26 @@ export function createAurora({ apiKey, fetch = globalThis.fetch, base = BASE }) 
   }
   return {
     // amount: USDC base units (6 decimals) the customer is expected to send; FLEX_INPUT swaps what arrives within the slippage band.
+    // minutes: how long the quote is open; a deposit below minAmountIn by then is refunded to refundTo.
     async quote({ origin, amount, recipient, refundTo, dry = false, minutes = 120, slippageBps = 100, now = Date.now() }) {
       if (!ORIGINS[origin]) throw new Error(`origin must be one of ${Object.keys(ORIGINS).join(', ')}`);
+      if (!Number.isInteger(minutes) || minutes < 10 || minutes > 240) throw new Error('minutes must be a whole number from 10 to 240');
       if (!/^[1-9]\d{0,12}$/.test(String(amount))) throw new Error('amount must be a positive integer of USDC base units');
       if (!SOLANA_ADDRESS.test(recipient)) throw new Error('recipient must be a Solana address');
       if (!EVM_ADDRESS.test(refundTo)) throw new Error('refundTo must be an EVM address on the origin chain');
+      const deadline = new Date(now + minutes * 60_000).toISOString();
       const answer = await call('quote', { method: 'POST', body: JSON.stringify({
         dry, swapType: 'FLEX_INPUT', depositType: 'ORIGIN_CHAIN', slippageTolerance: slippageBps,
         originAsset: ORIGINS[origin], destinationAsset: SOLANA_USDC, amount: String(amount),
         recipient, recipientType: 'DESTINATION_CHAIN', refundTo, refundType: 'ORIGIN_CHAIN',
-        deadline: new Date(now + minutes * 60_000).toISOString() }) });
+        deadline }) });
       const q = answer.quote ?? {};
       if (!dry && !q.depositAddress) throw new Error('Aurora quote has no deposit address');
+      // Aurora answers deadline = the one asked + 72 h (the deposit address stays active that long), so `deadline` is the asked one.
       return { origin, depositAddress: q.depositAddress ?? null, depositMemo: q.depositMemo ?? null,
         amountIn: q.amountIn, minAmountIn: q.minAmountIn, amountOut: q.amountOut, minAmountOut: q.minAmountOut,
-        timeEstimate: q.timeEstimate, deadline: q.deadline ?? null, correlationId: answer.correlationId };
+        refundFee: q.refundFee ?? null, timeEstimate: q.timeEstimate, deadline, activeUntil: q.timeWhenInactive ?? q.deadline ?? null,
+        correlationId: answer.correlationId };
     },
     async status(depositAddress, depositMemo) {
       const query = `?depositAddress=${encodeURIComponent(depositAddress)}${depositMemo ? `&depositMemo=${encodeURIComponent(depositMemo)}` : ''}`;
@@ -47,7 +52,8 @@ export function createAurora({ apiKey, fetch = globalThis.fetch, base = BASE }) 
       const details = answer.swapDetails ?? {};
       return { status: answer.status, final: FINAL.has(answer.status), deposited: details.depositedAmount ?? null,
         amountOut: details.amountOut ?? null, destinationTx: details.destinationChainTxHashes?.[0]?.hash ?? null,
-        refunded: details.refundedAmount ?? null };
+        refunded: details.refundedAmount ?? null, refundReason: details.refundReason ?? null,
+        originTxs: (details.originChainTxHashes ?? []).map(({ hash, explorerUrl }) => ({ hash, explorerUrl })) };
     }
   };
 }

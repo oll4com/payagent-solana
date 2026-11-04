@@ -53,7 +53,25 @@ test('status reads the swap: final only on SUCCESS, REFUNDED or FAILED', async (
   const { fetch, calls } = fakeFetch(success);
   const s = await createAurora({ apiKey: 'k', fetch }).status('0xDeposit');
   assert.equal(calls[0].url, 'https://intents-api.aurora.dev/api/status/k?depositAddress=0xDeposit');
-  assert.deepEqual(s, { status: 'SUCCESS', final: true, deposited: '2800000', amountOut: '2789421', destinationTx: '5Xy', refunded: null });
+  assert.deepEqual(s, { status: 'SUCCESS', final: true, deposited: '2800000', amountOut: '2789421', destinationTx: '5Xy', refunded: null, refundReason: null, originTxs: [] });
   const pending = await createAurora({ apiKey: 'k', fetch: fakeFetch({ status: 'PENDING_DEPOSIT' }).fetch }).status('0xDeposit');
   assert.equal(pending.final, false);
+});
+
+test('a refunded swap reports the amount, the reason and the origin-chain transactions', async () => {
+  const refunded = { status: 'REFUNDED', swapDetails: { depositedAmount: '3000000', refundedAmount: '2994700', refundReason: 'PARTIAL_DEPOSIT',
+    originChainTxHashes: [{ hash: '0xdep', explorerUrl: 'https://arbiscan.io/tx/0xdep', extra: 'ignored' }, { hash: '0xref', explorerUrl: 'https://arbiscan.io/tx/0xref' }] } };
+  const s = await createAurora({ apiKey: 'k', fetch: fakeFetch(refunded).fetch }).status('0xDeposit');
+  assert.deepEqual([s.status, s.final, s.refunded, s.refundReason, s.destinationTx], ['REFUNDED', true, '2994700', 'PARTIAL_DEPOSIT', null]);
+  assert.deepEqual(s.originTxs.map((t) => t.hash), ['0xdep', '0xref']);
+  assert.deepEqual(Object.keys(s.originTxs[0]), ['hash', 'explorerUrl']);
+});
+
+test('a live quote reports the deadline that was asked, not the 72 h Aurora adds to the deposit address', async () => {
+  const answer = { correlationId: 'c', quote: { ...dryQuote.quote, depositAddress: '0xDep', deadline: '1970-01-04T02:00:00.000Z', timeWhenInactive: '1970-01-04T02:00:00.000Z', refundFee: '5300' } };
+  const q = await createAurora({ apiKey: 'k', fetch: fakeFetch(answer).fetch }).quote({ origin: 'base', amount: 3000000, recipient, refundTo, minutes: 15, now: 0 });
+  assert.deepEqual([q.deadline, q.activeUntil, q.refundFee, q.depositAddress], ['1970-01-01T00:15:00.000Z', '1970-01-04T02:00:00.000Z', '5300', '0xDep']);
+  const { fetch, calls } = fakeFetch(answer);
+  for (const minutes of [0, 9, 241, 1.5, '15']) await assert.rejects(createAurora({ apiKey: 'k', fetch }).quote({ origin: 'base', amount: 1, recipient, refundTo, minutes }), /minutes/);
+  assert.equal(calls.length, 0);
 });

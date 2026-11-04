@@ -24,6 +24,9 @@ export function loadConfig(env = process.env) {
     tasksPerIpHour: int('TASKS_PER_IP_HOUR', 5), tasksPerDay: int('TASKS_PER_DAY', 200), trustProxy: env.TRUST_PROXY === '1',
     agentMaxTokens: int('AGENT_MAX_TOKENS', 800), agentDailyTokens: int('AGENT_DAILY_TOKENS', 0),
     reviewToken: env.REVIEW_TOKEN ?? '', repoUrl: env.REPO_URL ?? '',
+    // The demo's customer wallet (devnet-only key) and a path prefix when a reverse proxy serves the app under one (e.g. /solana).
+    demoPayerKey: env.DEVNET_PAYER_KEY ?? '', solanaRpcUrl: env.SOLANA_RPC_URL ?? '',
+    basePath: (() => { const v = env.BASE_PATH ?? ''; if (!/^(\/[a-z0-9-]+)?$/.test(v)) throw new Error('BASE_PATH must look like /solana'); return v; })(),
     port: int('PORT', 8787), dataDir: env.DATA_DIR ?? 'data'
   };
 }

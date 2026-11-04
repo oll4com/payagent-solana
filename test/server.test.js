@@ -20,20 +20,21 @@ const facilitator = {
   settle: async () => ({ success: true, transaction: '5devnetSig', network: DEVNET, payer: 'Payer1111' })
 };
 
-async function start({ aurora = null, owner = OWNER } = {}) {
+async function start({ aurora = null, owner = OWNER, solana, basePath = '', demoWallet = null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'payagent-solana-'));
   const config = loadConfig({ DEVNET_RECEIVER_ADDRESS: DEVNET_RECEIVER, SOLANA_RECEIVE_ADDRESS: owner, AURORA_API_KEY: aurora ? 'k' : '',
-    AURORA_RECHECK_MS: '0', REVIEW_TOKEN: 'r'.repeat(24), DATA_DIR: dir });
+    AURORA_RECHECK_MS: '0', REVIEW_TOKEN: 'r'.repeat(24), DATA_DIR: dir, BASE_PATH: basePath });
   const audit = createAuditLog(join(dir, 'audit.jsonl'));
   const service = createService({ config, audit, agent: createAgent({ AGENT_MODE: 'echo' }), storePath: join(dir, 'tasks.json'),
-    x402: await createX402({ payTo: DEVNET_RECEIVER, facilitator }), aurora });
-  const server = createApp({ config, service, audit }).listen(0);
-  const base = `http://127.0.0.1:${server.address().port}/api`;
+    x402: await createX402({ payTo: DEVNET_RECEIVER, facilitator }), aurora, solana });
+  const server = createApp({ config, service, audit, demoWallet }).listen(0);
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const base = `${origin}${basePath}/api`;
   const call = async (path, { method = 'GET', body, headers = {} } = {}) => {
     const r = await fetch(base + path, { method, headers: { 'content-type': 'application/json', ...headers }, body: body && JSON.stringify(body) });
     return { status: r.status, headers: r.headers, body: await r.json() };
   };
-  return { call, close: () => server.close() };
+  return { call, origin, close: () => server.close() };
 }
 
 test('a small task runs at once, its result answers 402, and a settled devnet payment releases it', async () => {
@@ -93,21 +94,136 @@ test('paying from another chain: a deposit address, then the swap status release
   } finally { close(); }
 });
 
-test('a refunded swap leaves the task payable, and no owner address means no deposit address', async () => {
-  const aurora = {
-    quote: async () => ({ depositAddress: '0xDeposit', amountIn: '50000', deadline: new Date(Date.now() + 3600e3).toISOString() }),
-    status: async () => ({ status: 'REFUNDED', final: true, refunded: '50000' })
+// A scripted Aurora: one quote, then the statuses in `steps` one per read (the last repeats).
+function scriptedAurora(steps, quote = {}) {
+  const queue = [...steps];
+  return {
+    quote: async (q) => ({ depositAddress: '0xDeposit', depositMemo: null, amountIn: String(q.amount), minAmountIn: '49500', amountOut: '49800', minAmountOut: '49000',
+      refundFee: '5300', deadline: new Date(Date.now() + 3600e3).toISOString(), activeUntil: null, ...quote }),
+    status: async () => ({ final: false, deposited: null, amountOut: null, destinationTx: null, refunded: null, refundReason: null, originTxs: [], ...(queue.length > 1 ? queue.shift() : queue[0]) })
   };
-  const { call, close } = await start({ aurora });
+}
+async function payThroughAurora(env, price = 50000) {
+  const task = (await env.call('/tasks', { method: 'POST', body: { description: 'One line', price } })).body;
+  await env.call(`/tasks/${task.id}/aurora-quote`, { method: 'POST', body: { origin: 'base', refundTo: REFUND } });
+  const check = async () => (await env.call(`/tasks/${task.id}/aurora-check`, { method: 'POST' })).body;
+  return { task, check, audit: async () => (await env.call('/audit')).body.entries.map((e) => e.status) };
+}
+
+test('an underpaid swap is refunded: the deposit, the refund and its reason are kept, the task stays payable and may be quoted again', async () => {
+  const aurora = scriptedAurora([{ status: 'PENDING_DEPOSIT' }, { status: 'INCOMPLETE_DEPOSIT', deposited: '30000' },
+    { status: 'REFUNDED', final: true, deposited: '30000', refunded: '24700', refundReason: 'PARTIAL_DEPOSIT', originTxs: [{ hash: '0xref', explorerUrl: 'https://arbiscan.io/tx/0xref' }] }]);
+  const env = await start({ aurora });
   try {
-    const task = (await call('/tasks', { method: 'POST', body: { description: 'One line', price: 50000 } })).body;
-    await call(`/tasks/${task.id}/aurora-quote`, { method: 'POST', body: { origin: 'base', refundTo: REFUND } });
-    const after = (await call(`/tasks/${task.id}/aurora-check`, { method: 'POST' })).body;
-    assert.deepEqual([after.status, after.aurora], ['AWAITING_PAYMENT', undefined]);
-  } finally { close(); }
-  const unset = await start({ aurora, owner: '' });
+    const { task, check, audit } = await payThroughAurora(env);
+    assert.equal((await check()).aurora.status, 'PENDING_DEPOSIT');
+    const incomplete = await check();
+    assert.deepEqual([incomplete.aurora.status, incomplete.aurora.deposited], ['INCOMPLETE_DEPOSIT', '30000']);
+    const refunded = await check();
+    assert.deepEqual([refunded.status, refunded.aurora], ['AWAITING_PAYMENT', undefined]);
+    assert.deepEqual(refunded.auroraHistory.map((h) => [h.status, h.refunded, h.refundReason, h.refundTo]), [['REFUNDED', '24700', 'PARTIAL_DEPOSIT', REFUND]]);
+    assert.equal(refunded.result, undefined);
+    assert.deepEqual((await audit()).slice(-3), ['AURORA_QUOTE', 'AURORA_INCOMPLETE_DEPOSIT', 'AURORA_REFUNDED']);
+    const again = await env.call(`/tasks/${task.id}/aurora-quote`, { method: 'POST', body: { origin: 'arbitrum', refundTo: REFUND } });
+    assert.deepEqual([again.status, again.body.aurora.origin, again.body.auroraHistory.length], [200, 'arbitrum', 1]);
+  } finally { env.close(); }
+});
+
+test('SUCCESS releases the result only when the deposit and delivery match the quote', async () => {
+  for (const [reported, problem] of [[{ deposited: '40000', amountOut: '49800' }, /deposited, below the quote's minimum 49500/], [{ deposited: '50000', amountOut: '48999' }, /delivered, below the quote's minimum 49000/]]) {
+    const env = await start({ aurora: scriptedAurora([{ status: 'SUCCESS', final: true, destinationTx: '5solSig', ...reported }]) });
+    try {
+      const { check, audit } = await payThroughAurora(env);
+      const after = await check();
+      assert.deepEqual([after.status, after.result, after.aurora.status], ['AWAITING_PAYMENT', undefined, 'SUCCESS']);
+      assert.match(after.aurora.problem, problem);
+      await check();
+      assert.deepEqual((await audit()).filter((s) => s === 'AURORA_SETTLEMENT_REJECTED'), ['AURORA_SETTLEMENT_REJECTED']);
+    } finally { env.close(); }
+  }
+});
+
+test('SUCCESS without a Solana transaction waits; with one, Solana must show the credit', async () => {
+  const success = { status: 'SUCCESS', final: true, deposited: '50000', amountOut: '49800', destinationTx: '5solSig' };
+  const calls = [];
+  const answers = [null, new Error('rate limited'), 48_000n, 49_800n];
+  const solana = { credited: async (q) => { calls.push(q); const a = answers.shift(); if (a instanceof Error) throw a; return a; } };
+  const env = await start({ aurora: scriptedAurora([{ ...success, destinationTx: null }, success]), solana });
+  try {
+    const { check } = await payThroughAurora(env);
+    assert.equal((await check()).status, 'AWAITING_PAYMENT');
+    assert.equal(calls.length, 0);
+    assert.equal((await check()).status, 'AWAITING_PAYMENT');
+    assert.equal((await check()).status, 'AWAITING_PAYMENT');
+    const rejected = await check();
+    assert.match(rejected.aurora.problem, /Solana shows 48000 credited to the owner, below the quote's minimum 49000/);
+    assert.deepEqual(calls[0], { signature: '5solSig', owner: OWNER });
+    assert.equal(calls.length, 3);
+  } finally { env.close(); }
+  const ok = await start({ aurora: scriptedAurora([success]), solana: { credited: async () => 49_800n } });
+  try {
+    const { check } = await payThroughAurora(ok);
+    const paid = await check();
+    assert.deepEqual([paid.status, paid.paidWith, paid.transaction, paid.auroraSettled.credited, paid.aurora.status], ['PAID', 'aurora-intents', '5solSig', '49800', 'SUCCESS']);
+    assert.match(paid.result, /echo test agent/);
+  } finally { ok.close(); }
+});
+
+test('a quote with a deposit in flight is never replaced, an unpaid expired one is', async () => {
+  const env = await start({ aurora: scriptedAurora([{ status: 'PROCESSING', deposited: '50000' }], { deadline: new Date(Date.now() - 1000).toISOString() }) });
+  try {
+    const { task, check } = await payThroughAurora(env);
+    assert.equal((await check()).aurora.status, 'PROCESSING');
+    const blocked = await env.call(`/tasks/${task.id}/aurora-quote`, { method: 'POST', body: { origin: 'base', refundTo: REFUND } });
+    assert.deepEqual([blocked.status, blocked.body.error], [409, 'a deposit is still being settled (PROCESSING); wait for it to finish or be refunded']);
+  } finally { env.close(); }
+  const idle = await start({ aurora: scriptedAurora([{ status: 'PENDING_DEPOSIT' }], { deadline: new Date(Date.now() - 1000).toISOString() }) });
+  try {
+    const { task } = await payThroughAurora(idle);
+    const again = await idle.call(`/tasks/${task.id}/aurora-quote`, { method: 'POST', body: { origin: 'base', refundTo: REFUND, minutes: 20 } });
+    assert.deepEqual([again.status, again.body.auroraHistory.map((h) => h.status)], [200, ['EXPIRED']]);
+  } finally { idle.close(); }
+});
+
+test('no owner address means no deposit address', async () => {
+  const unset = await start({ aurora: scriptedAurora([{ status: 'PENDING_DEPOSIT' }]), owner: '' });
   try {
     const task = (await unset.call('/tasks', { method: 'POST', body: { description: 'One line', price: 50000 } })).body;
     assert.equal((await unset.call(`/tasks/${task.id}/aurora-quote`, { method: 'POST', body: { origin: 'base', refundTo: REFUND } })).status, 503);
+    assert.equal((await unset.call('/config')).body.auroraEnabled, false);
   } finally { unset.close(); }
+});
+
+test('the demo wallet pays the 402 it is shown, once, and the page and its security headers are served', async () => {
+  const seen = [];
+  const demoWallet = { address: 'DemoWallet111', paymentHeaders: async (answer) => { seen.push(answer.status); return { 'PAYMENT-SIGNATURE': encodePaymentSignatureHeader({ x402Version: 2, accepted: answer.body.accepts[0], payload: { transaction: 'AQAB' } }) }; } };
+  const env = await start({ demoWallet });
+  try {
+    const task = (await env.call('/tasks', { method: 'POST', body: { description: 'One line', price: 50000 } })).body;
+    const paid = await env.call(`/tasks/${task.id}/demo-pay`, { method: 'POST' });
+    assert.deepEqual([paid.status, paid.body.status, paid.body.paidWith, seen], [200, 'PAID', 'x402-solana-devnet', [402]]);
+    assert.equal((await env.call(`/tasks/${task.id}/demo-pay`, { method: 'POST' })).body.status, 'PAID');
+    assert.equal((await env.call('/config')).body.demoWallet, true);
+    const page = await fetch(`${env.origin}/`);
+    assert.deepEqual([page.status, page.headers.get('content-type'), /script-src 'self'/.test(page.headers.get('content-security-policy')), (await page.text()).includes('PayAgent on Solana')], [200, 'text/html; charset=utf-8', true, true]);
+    assert.equal((await fetch(`${env.origin}/app.js`, { method: 'HEAD' })).status, 200);
+    assert.equal((await fetch(`${env.origin}/../package.json`)).status, 404);
+  } finally { env.close(); }
+  const none = await start();
+  try {
+    const task = (await none.call('/tasks', { method: 'POST', body: { description: 'One line', price: 50000 } })).body;
+    assert.equal((await none.call(`/tasks/${task.id}/demo-pay`, { method: 'POST' })).status, 404);
+  } finally { none.close(); }
+});
+
+test('behind a path prefix the page, the API and the 402 url all live under it', async () => {
+  const env = await start({ basePath: '/solana' });
+  try {
+    assert.equal((await fetch(`${env.origin}/solana`, { redirect: 'manual' })).headers.get('location'), '/solana/');
+    assert.equal((await fetch(`${env.origin}/solana/`)).status, 200);
+    assert.equal((await fetch(`${env.origin}/`)).status, 404);
+    const task = (await env.call('/tasks', { method: 'POST', body: { description: 'One line', price: 50000 } })).body;
+    const unpaid = await env.call(`/tasks/${task.id}/result`);
+    assert.equal(decodePaymentRequiredHeader(unpaid.headers.get('payment-required')).resource.url, `${env.origin}/solana/api/tasks/${task.id}/result`);
+  } finally { env.close(); }
 });

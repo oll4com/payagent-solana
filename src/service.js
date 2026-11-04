@@ -9,7 +9,7 @@ import { taskRef } from './audit.js';
 const PREVIEW_CHARS = 280;
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
-export function createService({ config, audit, agent, storePath, x402, aurora }) {
+export function createService({ config, audit, agent, storePath, x402, aurora, solana }) {
   const lastAuroraRead = new Map();
   const tasks = existsSync(storePath) ? JSON.parse(readFileSync(storePath, 'utf8')) : {};
   const save = () => writeFileSync(storePath, JSON.stringify(tasks, null, 2));
@@ -42,6 +42,29 @@ export function createService({ config, audit, agent, storePath, x402, aurora })
     } catch (error) {
       move(task, 'FAILED', { error: error.message, auditDetail: { error: error.message } });
     }
+  }
+
+  const amount = (v) => (/^\d+$/.test(String(v ?? '')) ? BigInt(v) : 0n);
+  async function settleAurora(task, s) {
+    const a = task.aurora;
+    const reject = (problem) => {
+      Object.assign(a, { status: 'SUCCESS', problem });
+      save();
+      audit.append({ task: taskRef(task.id), status: 'AURORA_SETTLEMENT_REJECTED', problem, deposited: s.deposited, amountOut: s.amountOut, transaction: s.destinationTx });
+    };
+    // Not provable yet: Aurora has not named the Solana transaction, or Solana does not know it as finalized. Ask again next time.
+    if (!s.destinationTx) return;
+    if (amount(s.deposited) < amount(a.minAmountIn)) return reject(`Aurora reports ${s.deposited} deposited, below the quote's minimum ${a.minAmountIn}`);
+    if (amount(s.amountOut) < amount(a.minAmountOut)) return reject(`Aurora reports ${s.amountOut} delivered, below the quote's minimum ${a.minAmountOut}`);
+    let onChain = null;
+    if (solana) {
+      try { onChain = await solana.credited({ signature: s.destinationTx, owner: config.solanaReceiveAddress }); } catch { return; }
+      if (onChain === null) return;
+      if (onChain < amount(a.minAmountOut)) return reject(`Solana shows ${onChain} credited to the owner, below the quote's minimum ${a.minAmountOut}`);
+    }
+    a.status = 'SUCCESS';
+    move(task, 'PAID', { paidWith: 'aurora-intents', transaction: s.destinationTx, auroraSettled: { deposited: s.deposited, amountOut: s.amountOut, credited: onChain?.toString() ?? null },
+      auditDetail: { paidWith: 'aurora-intents', origin: a.origin, deposited: s.deposited, amountOut: s.amountOut, credited: onChain?.toString(), transaction: s.destinationTx } });
   }
 
   return {
@@ -87,38 +110,47 @@ export function createService({ config, audit, agent, storePath, x402, aurora })
       return { status: 200, headers: paid.headers, body: this.view(id) };
     },
 
-    // Aurora: a FLEX_INPUT deposit address on the customer's chain that delivers USDC on Solana to the owner.
-    async auroraQuote(id, { origin, refundTo }) {
+    // Aurora: a FLEX_INPUT deposit address on the customer's chain that delivers USDC on Solana to the owner. The quote is what the
+    // customer paid for: a deposit of at least minAmountIn that delivers at least minAmountOut unlocks the task; less is refunded.
+    async auroraQuote(id, { origin, refundTo, minutes }) {
       const task = get(id);
       awaiting(task);
       if (!aurora || !config.solanaReceiveAddress) throw fail(503, 'paying from another chain is not set up on this server');
-      if (task.aurora && Date.parse(task.aurora.deadline) > Date.now()) return this.view(id);
-      const q = await aurora.quote({ origin, amount: task.price, recipient: config.solanaReceiveAddress, refundTo });
-      task.aurora = { origin, depositAddress: q.depositAddress, depositMemo: q.depositMemo, amountIn: q.amountIn,
-        minAmountIn: q.minAmountIn, minAmountOut: q.minAmountOut, deadline: q.deadline, status: 'PENDING_DEPOSIT' };
+      const open = task.aurora;
+      if (open && Date.parse(open.deadline) > Date.now()) return this.view(id);
+      // A deposit Aurora already saw is settled or refunded first; only a quote nobody paid into may be replaced.
+      // shortcut: a deposit that lands on a replaced quote's address is still swapped for the owner but no longer unlocks the task, upgrade by watching every open address.
+      if (open && open.status !== 'PENDING_DEPOSIT') throw fail(409, `a deposit is still being settled (${open.status}); wait for it to finish or be refunded`);
+      if (open) (task.auroraHistory ??= []).push({ ...open, endedAt: new Date().toISOString(), status: 'EXPIRED' });
+      const q = await aurora.quote({ origin, amount: task.price, recipient: config.solanaReceiveAddress, refundTo, minutes });
+      task.aurora = { origin, refundTo, depositAddress: q.depositAddress, depositMemo: q.depositMemo, amountIn: q.amountIn,
+        minAmountIn: q.minAmountIn, amountOut: q.amountOut, minAmountOut: q.minAmountOut, refundFee: q.refundFee,
+        deadline: q.deadline, activeUntil: q.activeUntil, status: 'PENDING_DEPOSIT' };
       save();
-      audit.append({ task: taskRef(id), status: 'AURORA_QUOTE', origin, depositAddress: q.depositAddress, amountIn: q.amountIn });
+      audit.append({ task: taskRef(id), status: 'AURORA_QUOTE', origin, depositAddress: q.depositAddress, amountIn: q.amountIn, minAmountIn: q.minAmountIn, deadline: q.deadline });
       return this.view(id);
     },
 
-    // Reads the swap's status at most once per interval, however often clients ask; SUCCESS releases the result.
+    // Reads the swap's status at most once per interval, however often clients ask. SUCCESS releases the result only after the
+    // amounts match the quote and the delivery shows on Solana; a refunded or failed swap is kept in the task's history.
     async auroraCheck(id) {
       const task = get(id);
-      if (!task.aurora || task.status !== 'AWAITING_PAYMENT') return this.view(id);
+      const a = task.aurora;
+      if (!a || task.status !== 'AWAITING_PAYMENT' || a.problem) return this.view(id);
       const now = Date.now();
       if (now - (lastAuroraRead.get(id) ?? 0) < config.auroraRecheckMs) return this.view(id);
       lastAuroraRead.set(id, now);
-      const s = await aurora.status(task.aurora.depositAddress, task.aurora.depositMemo);
-      if (s.status === task.aurora.status) return this.view(id);
-      task.aurora.status = s.status;
-      if (s.status === 'SUCCESS') {
-        move(task, 'PAID', { paidWith: 'aurora-intents', transaction: s.destinationTx,
-          auditDetail: { paidWith: 'aurora-intents', origin: task.aurora.origin, deposited: s.deposited, amountOut: s.amountOut, transaction: s.destinationTx } });
-      } else {
-        // A refunded or failed swap leaves the task payable: the customer may ask for a new deposit address.
-        if (s.final) delete task.aurora;
+      const s = await aurora.status(a.depositAddress, a.depositMemo);
+      if (s.status === 'SUCCESS') { await settleAurora(task, s); return this.view(id); }
+      if (s.status !== a.status) {
+        Object.assign(a, { status: s.status, deposited: s.deposited });
+        if (s.final) {
+          (task.auroraHistory ??= []).push({ ...a, refunded: s.refunded, refundReason: s.refundReason, originTxs: s.originTxs, endedAt: new Date().toISOString() });
+          delete task.aurora;
+        }
         save();
-        audit.append({ task: taskRef(id), status: `AURORA_${s.status}`, refunded: s.refunded ?? undefined });
+        audit.append({ task: taskRef(id), status: `AURORA_${s.status}`, deposited: s.deposited ?? undefined,
+          refunded: s.final ? s.refunded ?? undefined : undefined, refundReason: s.refundReason ?? undefined });
       }
       return this.view(id);
     },

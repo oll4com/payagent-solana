@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PayAgent on Solana: an AI agent you pay per task</title>
+  <meta name="description" content="An AI agent paid per task on Solana: a policy gate, x402 on devnet, any-chain payments through Aurora Intents, and a hash-chained audit log.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>PayAgent on Solana</h1>
+  <p class="lead">An AI agent you pay per task. A policy gate decides before any work runs; the result unlocks only when the payment settles on Solana: with <strong>x402</strong> (devnet) or from <strong>Arbitrum or Base</strong> through <strong>Aurora Intents</strong>. Every step goes to a tamper-evident audit log.</p>
+  <p class="links"><a id="repo-link" href="https://github.com/oll4com/payagent-solana" rel="noopener">Source (MIT)</a> · <a href="deck">Slides</a> · Encode Solana Hackathon 2026: Aurora Intents, Best Use of x402 on Solana</p>
+</header>
+
+<main>
+  <section aria-labelledby="h-new">
+    <h2 id="h-new">1. Give the agent a task</h2>
+    <form id="new-task">
+      <label for="description">What should the agent do?</label>
+      <textarea id="description" rows="3" maxlength="4000" required>Explain in three sentences why paying per request with x402 suits AI agents.</textarea>
+      <label for="price">Price in USDC</label>
+      <input id="price" type="number" min="0.01" max="5" step="0.01" value="0.01" required>
+      <p class="hint" id="price-hint">Tasks up to 1 USDC and 1,000 characters run at once; larger ones wait for a reviewer. Paying with x402 uses worthless devnet USDC. Paying from another chain moves real USDC: use a small price.</p>
+      <button type="submit">Submit task</button>
+    </form>
+    <p id="new-error" class="error" role="alert" hidden></p>
+  </section>
+
+  <section id="task-section" aria-labelledby="h-task" hidden>
+    <h2 id="h-task">2. The task</h2>
+    <dl id="facts"></dl>
+    <p id="status-line" aria-live="polite"></p>
+    <h3>Preview</h3>
+    <p id="preview" class="preview"></p>
+
+    <div id="pay" hidden>
+      <div class="pay-box">
+        <h3>Pay with x402 on Solana devnet</h3>
+        <p>The full result is an x402 resource. Without a payment it answers <code>402 Payment Required</code> with an <code>exact</code> requirement: devnet USDC to the owner. A wallet signs a transfer, a facilitator verifies and settles it, and only a settled transaction unlocks the result.</p>
+        <div class="buttons">
+          <button type="button" id="show-402">Show the 402</button>
+          <button type="button" id="demo-pay" hidden>Pay with the demo wallet (devnet)</button>
+        </div>
+        <pre id="x402-out" hidden></pre>
+        <p class="hint">Any x402 client pays the same route: <code>node --env-file=.env scripts/devnet-pay.mjs &lt;result URL&gt;</code>.</p>
+      </div>
+
+      <div class="pay-box">
+        <h3>Pay from another chain with Aurora Intents</h3>
+        <p id="aurora-off" hidden>Paying from another chain is not set up on this server.</p>
+        <form id="aurora-form">
+          <p class="warn">This path moves <strong>real USDC on mainnet</strong>. You send USDC on Arbitrum One or Base to a deposit address; Aurora swaps it into USDC on Solana for the owner. Send only USDC on the chosen chain.</p>
+          <label for="origin">Pay from</label>
+          <select id="origin"><option value="arbitrum">Arbitrum One (USDC)</option><option value="base">Base (USDC)</option></select>
+          <label for="refund-to">Refund address on that chain (yours)</label>
+          <input id="refund-to" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="0x…" pattern="0x[0-9a-fA-F]{40}" required>
+          <label for="minutes">Quote stays open for (minutes)</label>
+          <input id="minutes" type="number" min="10" max="240" step="1" value="120">
+          <p class="hint">If the swap fails or you send less than the minimum, Aurora refunds to this address when the quote closes, minus a small refund fee.</p>
+          <button type="submit">Get a deposit address</button>
+        </form>
+        <p id="aurora-error" class="error" role="alert" hidden></p>
+        <div id="aurora-box" hidden>
+          <dl id="aurora-facts"></dl>
+          <p id="aurora-status" class="status" aria-live="polite"></p>
+        </div>
+        <ul id="aurora-history"></ul>
+      </div>
+    </div>
+
+    <div id="result-box" hidden>
+      <h3>Result</h3>
+      <pre id="result-text"></pre>
+      <p id="settlement"></p>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-audit">
+    <h2 id="h-audit">Audit log</h2>
+    <p>Every step is appended with the hash of the entry before it, so an edit or a deletion shows. Tasks appear only by a short hash, because a task id unlocks a paid result.</p>
+    <button type="button" id="audit-refresh">Refresh</button>
+    <p id="audit-verdict" aria-live="polite"></p>
+    <ol id="audit-list"></ol>
+  </section>
+</main>
+
+<footer>
+  <p>Built for the Encode Club Solana Hackathon 2026. The policy gate, the audit log and the model call come from <a href="https://github.com/oll4com/payagent" rel="noopener">payagent</a> (MIT, built for BCH BLAZE); everything about Solana, x402 and Aurora Intents is new.</p>
+</footer>
+<script type="module" src="app.js"></script>
+</body>
+</html>
