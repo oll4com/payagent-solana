@@ -8,7 +8,7 @@ Entered in the Encode Club Solana Hackathon 2026 for two tracks: **Aurora Intent
 **Best Use of x402 on Solana**.
 
 - Live demo: https://payagent.oll4.com:4951/solana/ (x402 on Solana devnet; any-chain payments run on mainnet, see below)
-- Slides: https://payagent.oll4.com:4951/solana/deck
+- Slides: https://payagent.oll4.com:4951/solana/deck ([PDF](docs/PayAgent-on-Solana-slides.pdf))
 - Source: this repository (MIT)
 
 ## What it does
