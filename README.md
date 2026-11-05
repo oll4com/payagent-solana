@@ -113,6 +113,15 @@ scripts/demo-devnet.sh http://127.0.0.1:8787 "Write a haiku about Solana" 10000
 | `AGENT_*` | the model: `AGENT_API_URL`, `AGENT_API_KEY`, `AGENT_MODEL`, `AGENT_REASONING_EFFORT`, `AGENT_MAX_TOKENS`, `AGENT_DAILY_TOKENS` |
 | `AURORA_RECHECK_MS`, `BASE_PATH`, `PORT`, `DATA_DIR`, `REPO_URL` | polling interval, path prefix, listening port, data folder, source link |
 
+## Verified runs (devnet)
+
+| Run | Evidence |
+|---|---|
+| x402 payment through the real server, PayAI facilitator settling | [devnet transaction](https://explorer.solana.com/tx/4uNGu3WZmKd1WoFxJ1SDB35R6gPyfiMb5oH9iF5GQyKRMNkRgT6bvauZW2cggstaKZYsVuZ5UHLTrwS86U38i55x?cluster=devnet) |
+| The public demo, one task end to end: `402` with the `exact` requirement, payment by the demo wallet, settlement, result unlocked, audit chain verified (the model was busy, so the labelled offline agent answered) | [devnet transaction](https://explorer.solana.com/tx/3woUGm6hagdzqokRYJtkEUW2tsyjMF7VBFxT7vy9V5HZeQnnDGnJUHuFRWeA8ACcHiPyUehCNrfENh3sYDeTrt9f?cluster=devnet), finalized without error |
+
+An underpayment (1 base unit signed against the price) is refused with a new `402` and `PAYMENT_REFUSED` in the audit log; the task stays payable (`scripts/demo-devnet.sh` runs it).
+
 ## Tests
 
 `npm test` runs 28 tests with no network: the policy and audit chain, x402 requirements and payments through a scripted
